@@ -40,15 +40,10 @@ To assign the result of 5 + 7 to a new variable called x, you type x |
 
 > x \<- 5+7
 
-That’s a job well done!
-
 |====================| 21% | You’ll notice that R did not print the
 result of 12 this time. When you use the assignment operator, R |
 assumes that you don’t want to see the result immediately, but rather
 that you intend to use the result | for something else later on.
-
-To view the contents of the variable x, just type x and press Enter. Try
-it now.
 
 > x \[1\] 12
 
@@ -58,14 +53,10 @@ Now, store the result of x - 3 in a new variable called y.
 
 > y \<- x-3
 
-That’s a job well done!
-
 |============================| 29% | What is the value of y? Type y to
 find out.
 
 > y \[1\] 9
-
-You are quite good my friend!
 
 Now, let’s create a small collection of numbers called a vector. Any
 object that contains data is called | a data structure and numeric
@@ -80,6 +71,43 @@ To create a vector containing the numbers 1.1, 9, and 3.14, type c(1.1,
 9, 3.14). Try it now | and store the result in a variable called z.
 
 > z \<- c(1.1, 9, 3.14)
+
+|====================================| 37%
+
+Anytime you have questions about a particular function, you can access
+R’s built-in help files via the  
+`?` command. For example, if you want more information on the c()
+function, type ?c without the  
+parentheses that normally follow a function name. Give it a try.
+
+> ?c
+
+You can combine vectors to make a new vector. Create a new vector that
+contains z, 555, then z again in  
+that order. Don’t assign this vector to a new variable, so that we can
+just see the result immediately.
+
+> c(z, 555, z) \[1\] 1.10 9.00 3.14 555.00 1.10 9.00 3.14
+
+|===========================================| 45%
+
+Numeric vectors can be used in arithmetic expressions. Type the
+following to see what happens: z \* 2 + | 100.
+
+> z\*2+100 \[1\] 102.20 118.00 106.28
+
+|==============================================| 47%
+
+Take the square root of z - 1 and assign it to a new variable called
+my_sqrt. \> my_sqrt \<- sqrt(z-1)
+
+Think about how R handled the other ‘vectorized’ operations:
+element-by-element.
+
+1: a vector of length 0 (i.e. an empty vector) 2: a single number (i.e a
+vector of length 1) 3: a vector of length 3
+
+Выбор: 3
 
 That’s the answer I was looking for.
 
