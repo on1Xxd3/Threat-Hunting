@@ -1,7 +1,8 @@
 ---
 title: "lab1_"
-format: md
-output-file: README.md
+format: 
+  md:
+    output-file: README.md
 ---
 
 ------------------------------------------------------------------------
