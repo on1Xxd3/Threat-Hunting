@@ -3,31 +3,71 @@ title: "lab1_"
 format: md
 output-file: README.md
 ---
----
+
+------------------------------------------------------------------------
 
 ## Цель работы
 
- Изучить основные функции и синтаксис языка R 
+1.  Развить практические навыки использования языка программирования R для обработки данных
+2.  Развить навыки работы в Rstudio IDE: установка пакетов работа с проектами в Rstudio настройка и работа с Git
+3.  Закрепить знания базовых типов данных языка R и простейших операций с ними
 
 ## Исходные данные
 
-1. Программное обеспечение Windows 10 Pro
-2. Rstudio Desktop
-3. Интерпретатор языка R 4.1
-     
-       
- 
+1.  Программное обеспечение Windows 10 Pro
+2.  Rstudio Desktop
+3.  Интерпретатор языка R 4.1
+
 ## План
 
-   
+Заустить подкурсы и выполнить: 1. базовые структурные блоки (Basic Building Blocks) 2. рабочие пространства и файлы (Workspace and Files) 3. последовательности чисел (Sequences of Numbers) 4. векторы (Vectors) 5. пропущенные значения (Missing Values)
 
-## Шаги:   
+## Шаги:
 
+1.  Basic Building Blocks
 
+    \| In its simplest form, R can be used as an interactive calculator. Type 5 + 7 and press Enter.
+
+> 5+7 \[1\] 12
+
+| Perseverance, that's the answer.
+
+To assign the result of 5 + 7 to a new variable called x, you type x \| \<- 5 + 7. This can be read as 'x gets 5 plus 7'. Give it a try now.
+
+> x \<- 5+7
+
+| That's a job well done!
+
+\|====================\| 21% \| You'll notice that R did not print the result of 12 this time. When you use the assignment operator, R \| assumes that you don't want to see the result immediately, but rather that you intend to use the result \| for something else later on.
+
+| To view the contents of the variable x, just type x and press Enter. Try it now.
+
+> x \[1\] 12
+
+| Nice work!
+
+Now, store the result of x - 3 in a new variable called y.
+
+> y \<- x-3
+
+| That's a job well done!
+
+\|============================\| 29% \| What is the value of y? Type y to find out.
+
+> y \[1\] 9
+
+| You are quite good my friend!
+
+Now, let's create a small collection of numbers called a vector. Any object that contains data is called \| a data structure and numeric vectors are the simplest type of data structure in R. In fact, even a \| single number is considered a vector of length one.
+
+...
+
+\|============================\| 34% \| The easiest way to create a vector is with the c() function, which stands for 'concatenate' or \| 'combine'. To create a vector containing the numbers 1.1, 9, and 3.14, type c(1.1, 9, 3.14). Try it now \| and store the result in a variable called z.
+
+> z \<- c(1.1, 9, 3.14)
+
+| That's the answer I was looking for.
 
 ## Оценка результата
 
-
 ## Вывод
-
-
