@@ -1,5 +1,6 @@
 ---
 title: "Введение в R"
+author: "dimaa.04ru@yandex.ru"
 format: 
   md:
     output-file: README.md
@@ -25,6 +26,10 @@ format:
 Заустить подкурсы и выполнить: 1. базовые структурные блоки (Basic Building Blocks) 2. рабочие пространства и файлы (Workspace and Files) 3. последовательности чисел (Sequences of Numbers) 4. векторы (Vectors) 5. пропущенные значения (Missing Values)
 
 ## Шаги:
+
+```{r}
+sessionInfo()
+````
 
 1.  Basic Building Blocks
 
