@@ -1,0 +1,505 @@
+---
+title: "Исследование информации о состоянии беспроводных сетей"
+subtitle: "Отчет по практике 5"
+author: "dimaa.04ru@yandex.ru"
+format: 
+  md:
+    output-file: README.md
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+## Цель работы
+
+1. Получить знания о методах исследования радиоэлектронной обстановки.
+2. Сформировать понимание механизмов работы Wi-Fi сетей на канальном и сетевом уровне модели OSI.
+3. Закрепить практические навыки обработки данных на языке R.
+4. Закрепить знания ключевых функций tidyverse.
+
+## Исходные данные
+
+1. Программное обеспечение: ОС Windows 11 Pro.
+2. Среда разработки: RStudio.
+3. Интерпретатор: R 4.5.1.
+
+## План
+
+1. Импортировать данные из https://storage.yandexcloud.net/dataset.ctfsec/P2_wifi_data.csv (сбор airodump-ng).
+2. Привести датасеты к виду «аккуратных данных», задать корректные типы столбцов.
+3. Просмотреть структуру данных через glimpse().
+4. Выполнить анализ.
+5. Найти небезопасные точки доступа (без шифрования — OPN).
+6. Определить производителя для каждой точки доступа по OUI.
+7. Выявить устройства с WPA3 и их ESSID.
+8. Отсортировать точки доступа по времени присутствия в эфире (по убыванию).
+9. Найти топ-10 самых быстрых точек доступа.
+10. Отсортировать точки доступа по частоте beacon-пакетов (по убыванию).
+11. Определить производителей клиентских устройств по OUI.
+12. Найти устройства, которые не рандомизируют MAC.
+13. Кластеризовать запросы к точкам доступа по BSSID и определить интервалы видимости устройств.
+14. Оценить стабильность уровня сигнала внутри кластеров и выделить наиболее стабильный.
+
+## Шаги
+
+```{r setup, message=FALSE, warning=FALSE}
+# =============================================================================
+# 0) Подготовка окружения
+# =============================================================================
+
+options(repos = c(CRAN = "https://mirror.truenetwork.ru/CRAN/"))
+
+ensure_packages <- function(pkgs) {
+  missing_pkgs <- pkgs[!pkgs %in% rownames(installed.packages())]
+  if (length(missing_pkgs) > 0) {
+    install.packages(missing_pkgs)
+  }
+  invisible(lapply(pkgs, library, character.only = TRUE))
+}
+
+ensure_packages(c(
+  "readr","dplyr","tidyr","stringr","lubridate","janitor",
+  "R.utils","jsonlite","httr","V8","igraph","fpc","mclust"
+))
+```
+
+```{r}
+# =============================================================================
+# 1) Импорт данных + разбор CSV на AP и Station 
+# =============================================================================
+
+data_file <- "P2_wifi_data.csv"
+data_url  <- "https://storage.yandexcloud.net/dataset.ctfsec/P2_wifi_data.csv"
+
+if (!file.exists(data_file)) {
+  download.file(data_url, destfile = data_file, mode = "wb")
+}
+
+raw_lines <- readr::read_lines(data_file)
+
+# Ищем заголовок таблицы станций
+station_hdr <- "Station MAC, First time seen, Last time seen, Power, # packets, BSSID, Probed ESSIDs"
+
+station_hdr_idx <- stringr::str_which(raw_lines, paste0("^", station_hdr, "$"))
+
+if (length(station_hdr_idx) == 0) {
+  station_hdr_idx <- stringr::str_which(raw_lines, "^Station MAC,")
+  if (length(station_hdr_idx) == 0) {
+    stop("Не найден заголовок Station MAC в файле")
+  }
+}
+
+station_hdr_idx <- station_hdr_idx[1]
+
+
+lines_before_station <- raw_lines[seq_len(station_hdr_idx - 1)]
+empty_before_station <- stringr::str_which(lines_before_station, "^\\s*$")
+
+if (length(empty_before_station) == 0) {
+  stop("Не найден разделитель между AP и Station")
+}
+
+sep_idx <- empty_before_station[length(empty_before_station)]
+
+ap_rows_n <- sep_idx - 3
+if (ap_rows_n <= 0) stop("Не удалось корректно вычислить число строк AP")
+
+# Типы столбцов
+ap_types <- readr::cols_only(
+  "BSSID" = readr::col_character(),
+  "First time seen" = readr::col_character(),
+  "Last time seen" = readr::col_character(),
+  "channel" = readr::col_number(),
+  "Speed" = readr::col_number(),
+  "Privacy" = readr::col_character(),
+  "Cipher" = readr::col_character(),
+  "Authentication" = readr::col_character(),
+  "Power" = readr::col_number(),
+  "# beacons" = readr::col_number(),
+  "# IV" = readr::col_number(),
+  "LAN IP" = readr::col_character(),
+  "ID-length" = readr::col_number(),
+  "ESSID" = readr::col_character(),
+  "Key" = readr::col_character()
+)
+
+sta_types <- readr::cols_only(
+  "Station MAC" = readr::col_character(),
+  "First time seen" = readr::col_character(),
+  "Last time seen" = readr::col_character(),
+  "Power" = readr::col_number(),
+  "# packets" = readr::col_number(),
+  "BSSID" = readr::col_character(),
+  "Probed ESSIDs" = readr::col_character()
+)
+
+# Чтение таблиц
+ap_tbl_raw <- readr::read_csv(
+  file = data_file,
+  n_max = ap_rows_n,
+  col_types = ap_types,
+  show_col_types = FALSE
+)
+
+sta_tbl_raw <- readr::read_csv(
+  file = data_file,
+  skip = station_hdr_idx - 1,
+  col_types = sta_types,
+  show_col_types = FALSE
+)
+```
+
+```{r}
+# =============================================================================
+
+# 2–3) «Аккуратные данные» + просмотр структуры
+
+# =============================================================================
+
+ap_tbl <- ap_tbl_raw
+sta_tbl <- sta_tbl_raw
+
+names(ap_tbl) <- janitor::make_clean_names(names(ap_tbl))
+names(sta_tbl) <- janitor::make_clean_names(names(sta_tbl))
+
+ap_tbl <- ap_tbl %>%
+mutate(
+first_time_seen = lubridate::ymd_hms(first_time_seen, tz = "UTC"),
+last_time_seen  = lubridate::ymd_hms(last_time_seen,  tz = "UTC")
+) %>%
+mutate_if(is.character, ~trimws(.x))
+
+sta_tbl <- sta_tbl %>%
+mutate(
+first_time_seen = lubridate::ymd_hms(first_time_seen, tz = "UTC"),
+last_time_seen  = lubridate::ymd_hms(last_time_seen,  tz = "UTC")
+) %>%
+mutate_if(is.character, ~trimws(.x))
+
+cat("\n--- Типы столбцов AP (после преобразований) ---\n")
+glimpse(ap_tbl)
+cat("\n--- Типы столбцов Station (после преобразований) ---\n")
+glimpse(sta_tbl)
+```
+
+```{r}
+# =============================================================================
+
+# 4) Подготовка OUI-базы производителей (Wireshark manuf)
+
+# =============================================================================
+
+manuf_path <- "wireshark_manuf.txt"
+manuf_url <- "https://www.wireshark.org/download/automated/data/manuf"
+
+if (!file.exists(manuf_path)) {
+tryCatch(
+download.file(url = manuf_url, destfile = manuf_path, mode = "wb"),
+error = function(e) {}
+)
+}
+
+read_manuf_db <- function(path) {
+lines <- readLines(path, encoding = "UTF-8")
+lines <- lines[trimws(lines) != ""]
+
+oui_vec <- character(0)
+vendor_vec <- character(0)
+
+for (ln in lines) {
+parts <- strsplit(ln, "\t", fixed = TRUE)[[1]]
+if (length(parts) < 2) next
+
+
+raw_oui <- parts[1]
+vendor  <- parts[2]
+norm_oui <- toupper(gsub("[^0-9A-Fa-f]", "", raw_oui))
+
+# Берём только классический OUI (6 hex-символов)
+if (nchar(norm_oui) == 6) {
+  oui_vec <- c(oui_vec, norm_oui)
+  vendor_vec <- c(vendor_vec, vendor)
+}
+
+
+}
+
+db <- data.frame(
+oui = oui_vec,
+manufacturer = vendor_vec,
+stringsAsFactors = FALSE
+)
+
+if (nrow(db) == 0) {
+return(data.frame(oui = character(0), manufacturer = character(0), stringsAsFactors = FALSE))
+}
+
+db[!duplicated(db$oui), , drop = FALSE]
+}
+
+oui_db <- read_manuf_db(manuf_path)
+
+lookup_manufacturer <- function(mac_or_oui, db) {
+if (is.na(mac_or_oui) || mac_or_oui == "" || is.null(mac_or_oui)) return(NA_character_)
+norm <- toupper(gsub("[^0-9A-Fa-f]", "", as.character(mac_or_oui)))
+if (nchar(norm) < 6) return(NA_character_)
+norm <- substr(norm, 1, 6)
+
+hit <- db$manufacturer[db$oui == norm]
+if (length(hit) > 0 && !is.na(hit[1])) hit[1] else NA_character_
+}
+
+attach_manufacturer <- function(tbl, mac_col, db) {
+tbl %>%
+mutate(
+oui = ifelse(
+is.na(.data[[mac_col]]) | .data[[mac_col]] == "",
+NA_character_,
+substr(toupper(gsub("[^0-9A-Fa-f]", "", .data[[mac_col]])), 1, 6)
+),
+oui = ifelse(nchar(oui) == 6, oui, NA_character_)
+) %>%
+left_join(db, by = "oui") %>%
+select(-oui)
+}
+```
+
+```{r}
+# =============================================================================
+
+# 5) Небезопасные точки доступа (OPN)
+
+# =============================================================================
+
+unsafe_aps <- ap_tbl %>% filter(privacy == "OPN")
+print(unsafe_aps)
+```
+
+```{r}
+# =============================================================================
+
+# 6) Производители точек доступа по OUI
+
+# =============================================================================
+
+ap_tbl <- attach_manufacturer(ap_tbl, "bssid", oui_db) %>%
+relocate(all_of("manufacturer"), .after = all_of("bssid"))
+
+print(ap_tbl)
+```
+
+```{r}
+# =============================================================================
+
+# 7) Точки доступа с WPA3
+
+# =============================================================================
+
+wpa3_aps <- ap_tbl %>%
+filter(grepl("WPA3", authentication, ignore.case = TRUE) |
+grepl("WPA3", privacy, ignore.case = TRUE))
+
+print(wpa3_aps %>% select(bssid, privacy, essid))
+```
+
+```{r}
+# =============================================================================
+
+# 8) Суммарное время на связи (с учётом сессий)
+
+# =============================================================================
+
+merge_sessions <- function(ap_one, gap_seconds = 2700) {
+ap_one <- ap_one %>% filter(!is.na(first_time_seen) & !is.na(last_time_seen))
+if (nrow(ap_one) == 0) {
+return(tibble(bssid = character(), total_duration_seconds = numeric()))
+}
+
+ap_one <- ap_one %>% arrange(first_time_seen)
+starts <- ap_one$first_time_seen
+ends   <- ap_one$last_time_seen
+
+sess_starts <- starts[1]
+sess_ends   <- ends[1]
+
+for (i in 2:nrow(ap_one)) {
+cur_start <- starts[i]
+cur_end   <- ends[i]
+prev_end  <- sess_ends[length(sess_ends)]
+dt <- as.numeric(cur_start - prev_end, units = "secs")
+
+
+if (is.na(dt) || dt > gap_seconds) {
+  sess_starts <- c(sess_starts, cur_start)
+  sess_ends   <- c(sess_ends, cur_end)
+} else {
+  sess_ends[length(sess_ends)] <- max(sess_ends[length(sess_ends)], cur_end)
+}
+
+
+}
+
+tibble(
+bssid = rep(ap_one$bssid[1], length(sess_starts)),
+total_duration_seconds = as.numeric(sess_ends - sess_starts, units = "secs")
+)
+}
+
+wifi_ap_sorted_by_duration <- ap_tbl %>%
+filter(!is.na(first_time_seen) & !is.na(last_time_seen)) %>%
+group_by(bssid) %>%
+summarise(
+sessions_data = list(merge_sessions(cur_data())),
+.groups = "drop"
+) %>%
+unnest(sessions_data) %>%
+group_by(bssid) %>%
+summarise(
+total_time_on_channel_seconds = sum(total_duration_seconds, na.rm = TRUE),
+.groups = "drop"
+) %>%
+arrange(desc(total_time_on_channel_seconds))
+
+print(wifi_ap_sorted_by_duration)
+```
+```{r}
+# =============================================================================
+
+# 9) Топ-10 самых быстрых точек доступа
+
+# =============================================================================
+
+top_10_fastest_aps <- ap_tbl %>%
+filter(!is.na(speed)) %>%
+arrange(desc(speed)) %>%
+slice_head(n = 10)
+
+print(select(top_10_fastest_aps, bssid, essid, speed, manufacturer))
+```
+
+```{r}
+# =============================================================================
+
+# 10) Частота beacon-пакетов
+
+# =============================================================================
+
+wifi_ap_with_beacon_freq <- ap_tbl %>%
+mutate(
+time_diff_seconds = as.numeric(difftime(last_time_seen, first_time_seen, units = "secs")),
+beacon_frequency = ifelse(
+is.na(time_diff_seconds) | time_diff_seconds == 0,
+NA_real_,
+number_beacons / time_diff_seconds
+)
+) %>%
+filter(!is.na(beacon_frequency))
+
+wifi_ap_sorted_by_beacon_freq <- wifi_ap_with_beacon_freq %>%
+arrange(desc(beacon_frequency))
+
+print(select(
+wifi_ap_sorted_by_beacon_freq,
+bssid, essid, number_beacons, time_diff_seconds, beacon_frequency
+))
+```
+
+```{r}
+# =============================================================================
+
+# 11) Производители клиентских устройств
+
+# =============================================================================
+
+sta_tbl <- attach_manufacturer(sta_tbl, "station_mac", oui_db) %>%
+relocate(all_of("manufacturer"), .after = all_of("station_mac"))
+
+print(sta_tbl)
+```
+
+```{r}
+# =============================================================================
+
+# 12) Устройства без рандомизации MAC
+
+# =============================================================================
+
+is_not_randomized_vectorized <- function(mac_vec) {
+is_empty <- is.na(mac_vec) | (mac_vec == "")
+res <- rep(NA, length(mac_vec))
+
+ok_idx <- !is_empty
+ok_macs <- mac_vec[ok_idx]
+
+if (length(ok_macs) > 0) {
+first_hex <- substr(ok_macs, 1, 2)
+first_dec <- strtoi(first_hex, base = 16)
+ul_bit_set <- (first_dec & 0x02) != 0
+res[ok_idx] <- !ul_bit_set
+}
+
+res
+}
+
+sta_tbl <- sta_tbl %>%
+mutate(does_not_randomize = is_not_randomized_vectorized(station_mac))
+
+print(sta_tbl %>% filter(does_not_randomize == TRUE))
+```
+
+```{r}
+# =============================================================================
+
+# 13) Кластеризация по BSSID
+
+# =============================================================================
+
+wifi_station_clustered <- sta_tbl %>%
+filter(bssid != "(not associated)") %>%
+group_by(bssid) %>%
+summarise(
+cluster_appeared = min(first_time_seen, na.rm = TRUE),
+cluster_disappeared = max(last_time_seen, na.rm = TRUE),
+unique_clients_count = n_distinct(station_mac),
+total_observations = n(),
+.groups = "drop"
+) %>%
+arrange(cluster_appeared)
+
+print(wifi_station_clustered)
+```
+
+```{r}
+# =============================================================================
+
+# 14) Стабильность уровня сигнала внутри кластеров
+
+# =============================================================================
+
+wifi_station_for_stability <- sta_tbl %>%
+filter(bssid != "(not associated)", !is.na(power))
+
+cluster_stability_raw <- wifi_station_for_stability %>%
+group_by(bssid) %>%
+summarise(
+mean_power = mean(power, na.rm = TRUE),
+sd_power = sd(power, na.rm = TRUE),
+observation_count = n(),
+.groups = "drop"
+)
+
+cluster_stability_sorted <- cluster_stability_raw %>%
+arrange(sd_power) %>%
+mutate(stability_measure = 1 / (1 + sd_power)) %>%
+select(bssid, everything())
+
+print(cluster_stability_sorted)
+```
+
+##Оценка результата
+
+В ходе практики была проанализирована радиоэлектронная обстановка в зоне наблюдения. На основе собранных данных сформировано целостное представление о работе Wi-Fi сетей на канальном и сетевом уровнях модели OSI и об основных признаках их поведения в эфире.
+
+##Вывод
+
+Выполненная работа позволила отработать обработку реальных сетевых данных в R и закрепить использование ключевых инструментов tidyverse. В результате были выявлены параметры точек доступа и клиентских устройств, их производители, характеристики безопасности, а также особенности активности и устойчивости сигналов в эфире.
