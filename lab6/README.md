@@ -135,7 +135,7 @@ cat("JSON файл:", json_inside, "\n")
 cat("Путь:", json_path, "\n")
 ```
 
-    Путь: C:\Users\PC\AppData\Local\Temp\RtmpWCaMz9/caldera_attack_evals_round1_day1_2019-10-20201108.json 
+    Путь: C:\Users\PC\AppData\Local\Temp\Rtmp0aSztL/caldera_attack_evals_round1_day1_2019-10-20201108.json 
 
 ``` r
 cat("Тип:", class(log_raw), "\n")
